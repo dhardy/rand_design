@@ -7,13 +7,8 @@
 //! 
 //! Note: this *only* considers the next_u32 member function.
 //! 
-//! Thoughts: a bit messy. This only considers the two cases covered by other
-//! examples: infallible non-crypto RNG and fallible crypto RNG, but it should
-//! also consider at least CryptoRng<!>.
+//! Thoughts: better than I had expected. A little complex. Might be workable.
 #![feature(never_type)]
-
-use std::marker::PhantomData;
-use std::fmt::Debug;
 
 // ——— traits ———
 
@@ -48,20 +43,21 @@ impl<R: RawRng<!>+?Sized> RawRng<Error> for R {
     }
 }
 
+impl<R: CryptoRng<!>+?Sized> CryptoRng<Error> for R {}
+
 // ——— adaptor ———
 
 // Given `rng` of type `T` where `T: CryptoRng`, this can consume
 // `&mut rng` (`as_rng(rng)`)
-fn as_rng_ref<'a, E: Debug, CR: RawRng<E>+?Sized+'a>(rng: &'a mut CR) -> AsRng<'a, E, CR> {
-    AsRng { _phantom: PhantomData {}, rng }
+fn as_rng_ref<'a, CR: RawRng<Error>+?Sized+'a>(rng: &'a mut CR) -> AsRng<'a, CR> {
+    AsRng { rng }
 }
 
-struct AsRng<'a, E: Debug, CR: RawRng<E>+?Sized+'a> {
-    _phantom: PhantomData<E>,
+struct AsRng<'a, CR: RawRng<Error>+?Sized+'a> {
     rng: &'a mut CR
 }
 
-impl<'a, E: Debug, CR: RawRng<E>+?Sized> Rng for AsRng<'a, E, CR> {
+impl<'a, CR: RawRng<Error>+?Sized> Rng for AsRng<'a, CR> {
     fn next_u32(&mut self) -> u32 {
         self.rng.try_next_u32().unwrap()
     }
@@ -79,44 +75,72 @@ impl Rng for TestRng {
     }
 }
 
-// A CryptoRng
+// An infallible CryptoRng
 #[derive(Debug)]
-struct TestCRng(u32);
+struct TestICRng(u32);
 
-impl RawRng<Error> for TestCRng {
+impl Rng for TestICRng {
+    fn next_u32(&mut self) -> u32 {
+        self.0
+    }
+}
+
+impl CryptoRng<!> for TestICRng {}
+
+// A fallible CryptoRng
+#[derive(Debug)]
+struct TestFCRng(u32);
+
+impl RawRng<Error> for TestFCRng {
     fn try_next_u32(&mut self) -> Result<u32, Error> {
         Ok(self.0)
     }
 }
 
-impl CryptoRng<Error> for TestCRng {}
+impl CryptoRng<Error> for TestFCRng {}
 
 // ——— usage ———
 
 fn main() {
     let mut t = TestRng(13);
-    let mut c = TestCRng(42);
+    let mut ic = TestICRng(17);
+    let mut fc = TestFCRng(42);
     println!("t: {:?} impls Rng", t);
-    println!("c: {:?} impls CryptoRng", c);
+    println!("ic: {:?} impls CryptoRng", ic);
+    println!("fc: {:?} impls CryptoRng", fc);
     {
-        // Do both traits support both functions via static dispatch?
+        // Do all traits support all functions via static dispatch?
         println!("t, static dispatch, using RawRng<Error>: {:?}", RawRng::<Error>::try_next_u32(&mut t));
         println!("t, static dispatch, using Rng: {:?}", t.next_u32());
-        println!("c, static dispatch, using RawRng<Error>: {:?}", c.try_next_u32());
-        println!("c, static dispatch, using Rng: {:?}", as_rng_ref(&mut c).next_u32());
+        println!("ic, static dispatch, using RawRng<Error>: {:?}", RawRng::<Error>::try_next_u32(&mut ic));
+        println!("ic, static dispatch, using Rng: {:?}", as_rng_ref(&mut ic).next_u32());
+        println!("fc, static dispatch, using RawRng<Error>: {:?}", fc.try_next_u32());
+        println!("fc, static dispatch, using Rng: {:?}", as_rng_ref(&mut fc).next_u32());
     }
     {
-        // Can both types be used via RawRng<Error> with dynamic dispatch?
-        let cr = &mut c as &mut RawRng<Error>;
-        println!("c, dynamic dispatch, using RawRng<Error>: {:?}", cr.try_next_u32());
+        // Can all types be used via RawRng<Error> with dynamic dispatch?
+        let ir = &mut ic as &mut RawRng<Error>;
+        println!("ic, dynamic dispatch, using RawRng<Error>: {:?}", ir.try_next_u32());
+        let cr = &mut fc as &mut RawRng<Error>;
+        println!("fc, dynamic dispatch, using RawRng<Error>: {:?}", cr.try_next_u32());
         let tr = &mut t as &mut RawRng<Error>;
         println!("t, dynamic dispatch, using RawRng<Error>: {:?}", tr.try_next_u32());
     }
     {
-        // Can both types be used via RawRng<!> with dynamic dispatch?
-        let mut cr = as_rng_ref(&mut c as &mut CryptoRng<Error>);
+        // Can all types be used via RawRng<!> with dynamic dispatch?
+        let ir = &mut ic as &mut Rng;
+        let mut cr = as_rng_ref(&mut fc as &mut CryptoRng<Error>);
         let tr = &mut t as &mut Rng;
-        println!("c, dynamic dispatch, using Rng: {:?}", cr.next_u32());
+        println!("ic, dynamic dispatch, using Rng: {:?}", ir.next_u32());
+        println!("fc, dynamic dispatch, using Rng: {:?}", cr.next_u32());
         println!("t, dynamic dispatch, using Rng: {:?}", tr.next_u32());
+    }
+    {
+        // Can both crypto RNGs be used via CryptoRng<Error> with dynamic dispatch?
+        let ir = &mut ic as &mut CryptoRng<Error>;
+        let fr = &mut fc as &mut CryptoRng<Error>;
+        println!("ic, dynamic dispatch, using CryptoRng: {:?}", ir.try_next_u32());
+        println!("fc, dynamic dispatch, using CryptoRng: {:?}", fr.try_next_u32());
+        
     }
 }
