@@ -97,19 +97,40 @@ impl CryptoRng for TestCRng {
     }
 }
 
+// A dual-purpose Rng
+#[derive(Debug)]
+struct TestBothRng(u32);
+
+impl Rng for TestBothRng {
+    fn next_u32(&mut self) -> u32 {
+        self.0
+    }
+}
+
+impl CryptoRng for TestBothRng {
+    fn try_next_u32(&mut self) -> Result<u32, CryptoError> {
+        Ok(self.0)
+    }
+}
+
+
 // ——— usage ———
 
 fn main() {
     let mut t = TestRng(13);
     let mut c = TestCRng(42);
+    let mut b = TestBothRng(3651);
     println!("t: {:?} impls Rng", t);
     println!("c: {:?} impls CryptoRng", c);
+    println!("b: {:?} impls both", b);
     {
         // Do both traits support both functions via static dispatch?
         println!("t, static dispatch, using CryptoRng: {:?}", as_crng(&mut t).try_next_u32());
         println!("t, static dispatch, using Rng: {:?}", t.next_u32());
         println!("c, static dispatch, using CryptoRng: {:?}", c.try_next_u32());
         println!("c, static dispatch, using Rng: {:?}", as_rng(&mut c).next_u32());
+        println!("b, static dispatch, using CryptoRng: {:?}", b.try_next_u32());
+        println!("b, static dispatch, using Rng: {:?}", b.next_u32());
     }
     {
         // Can both types be used via CryptoRng with dynamic dispatch?
@@ -117,12 +138,16 @@ fn main() {
         println!("c, dynamic dispatch, using CryptoRng: {:?}", cr.try_next_u32());
         let mut tr = as_crng(&mut t as &mut Rng);
         println!("t, dynamic dispatch, using CryptoRng: {:?}", tr.try_next_u32());
+        let br = &mut b as &mut CryptoRng;
+        println!("b, dynamic dispatch, using CryptoRng: {:?}", br.try_next_u32());
     }
     {
         // Can both types be used via Rng with dynamic dispatch?
         let mut cr = as_rng(&mut c as &mut CryptoRng);
         let tr = &mut t as &mut Rng;
+        let br = &mut b as &mut Rng;
         println!("c, dynamic dispatch, using Rng: {:?}", cr.next_u32());
         println!("t, dynamic dispatch, using Rng: {:?}", tr.next_u32());
+        println!("b, dynamic dispatch, using Rng: {:?}", br.next_u32());
     }
 }
