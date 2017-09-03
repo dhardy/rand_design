@@ -1,6 +1,4 @@
-use std::cmp::min;
-use std::mem::size_of;
-use std::ptr::copy_nonoverlapping;
+extern crate core;
 
 #[derive(Debug)]
 pub struct Error;
@@ -52,21 +50,27 @@ pub trait CryptoRng: Rng {}
 /// Convenient implementation for `fill` in terms of `next_u64`.
 // TODO: Also for u32, u128 via macro internals.
 pub fn impl_fill_from_u64<R: Rng+?Sized>(rng: &mut R, dest: &mut [u8]) {
-    let mut p: *mut u8 = &mut dest[0] as *mut u8;
-    let mut len = dest.len();
-    while len > 0 {
+    use core::cmp::min;
+    use core::intrinsics::copy_nonoverlapping;
+    use core::mem::size_of;
+    
+    let mut pos = 0;
+    let len = dest.len();
+    while len > pos {
+        // Cast pointer, effectively to `&[u8; 8]`, and copy as many bytes
+        // as required. Byte-swap x on BE architectures.
         let x = rng.next_u64().to_le();
         let xp = &x as *const u64 as *const u8;
-        let n = min(len, size_of::<u64>());
+        let p: *mut u8 = unsafe{ dest.as_mut_ptr().offset(pos as isize) };
+        let n = min(len - pos, size_of::<u64>());
         unsafe{ copy_nonoverlapping(xp, p, n); }
-        unsafe{ p = p.offset(n as isize); }
-        len -= n;
+        pos += n;
     }
 }
 
 macro_rules! impl_uint_from_fill {
     ($ty:ty, $N:expr, $rng:expr) => ({
-        assert_eq!($N, size_of::<$ty>());
+        assert_eq!($N, ::core::mem::size_of::<$ty>());
         let mut buf = [0u8; $N];
         $rng.fill(&mut buf);
         unsafe{ *(&buf[0] as *const u8 as *const $ty) }.to_le()
